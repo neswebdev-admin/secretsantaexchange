@@ -1,0 +1,78 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <meta name="robots" content="noindex" />
+  <title>Your Gift Exchange</title>
+  <link rel="stylesheet" href="style.css" />
+</head>
+<body>
+  <div class="wrap">
+    <header class="hero">
+      <div class="emoji">🎄</div>
+      <h1 id="title">Gift Exchange</h1>
+      <p class="sub" id="subtitle"></p>
+      <div class="meta" id="meta"></div>
+    </header>
+
+    <section class="card" id="list-card" hidden>
+      <div style="display:flex;justify-content:space-between;align-items:center;gap:12px;flex-wrap:wrap;margin-bottom:6px">
+        <h2 style="margin:0">Who you're buying for</h2>
+        <button class="btn small secondary" id="reveal-all">Show all</button>
+      </div>
+      <p class="muted small" style="margin-top:0">Tap a name to reveal it. Kids, no peeking at anyone else's! 🤫</p>
+      <div id="pairs"></div>
+    </section>
+
+    <section class="card err" id="bad-link" hidden>
+      This link doesn't look right. Ask the organizer to send it again, and copy the whole link.
+    </section>
+
+    <footer id="footer"></footer>
+  </div>
+
+  <script src="shared.js"></script>
+  <script>
+    (function () {
+      const $ = (id) => document.getElementById(id);
+      const esc = (s) => String(s).replace(/[&<>"']/g, (c) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" }[c]));
+
+      window.addEventListener("hashchange", () => location.reload());
+
+      let data;
+      try { data = window.GiftExchange.decodePayload(location.hash.slice(1)); } catch { data = null; }
+      if (!data || !Array.isArray(data.a)) { $("bad-link").hidden = false; return; }
+
+      document.title = `${data.g} · ${data.t}`;
+      $("title").textContent = data.t + (data.y ? " " + data.y : "");
+      $("subtitle").textContent = `Picks for ${data.g}`;
+      const meta = [];
+      if (data.b) meta.push(`💰 Budget: ${esc(data.b)}`);
+      if (data.d) meta.push(`📅 ${esc(data.d)}`);
+      $("meta").innerHTML = meta.map((m) => `<span>${m}</span>`).join("");
+
+      const roleLabel = { parent: "Parent", child: "", solo: "" };
+      $("pairs").innerHTML = data.a.map(([giver, role, receiver], i) => `
+        <div class="pair">
+          <div class="giver">${esc(giver)}${roleLabel[role] ? `<small>${roleLabel[role]}</small>` : ""}</div>
+          <div class="receiver" data-i="${i}">
+            <button class="reveal" type="button">🎁 Tap to reveal</button>
+          </div>
+        </div>`).join("");
+      $("list-card").hidden = false;
+
+      function reveal(el) {
+        const i = +el.dataset.i;
+        el.innerHTML = `<span class="small muted">is buying for</span><br><span class="revealed">${esc(data.a[i][2])}</span>`;
+      }
+      document.querySelectorAll(".receiver").forEach((el) =>
+        el.querySelector("button").addEventListener("click", () => reveal(el)));
+      $("reveal-all").addEventListener("click", () =>
+        document.querySelectorAll(".receiver").forEach((el) => { if (el.querySelector("button")) reveal(el); }));
+
+      $("footer").innerHTML = `Draw code <span class="code">${esc(data.c)}</span>. Keep it secret! 🤫`;
+    })();
+  </script>
+</body>
+</html>

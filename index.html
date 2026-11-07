@@ -1,0 +1,161 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <meta name="robots" content="noindex" />
+  <title>Gift Exchange Organizer</title>
+  <link rel="stylesheet" href="style.css" />
+</head>
+<body>
+  <div class="wrap">
+    <header class="hero">
+      <div class="emoji">🎁</div>
+      <h1 id="title">Gift Exchange</h1>
+      <p class="sub">Organizer page: draw names and send each family its link.</p>
+    </header>
+
+    <div id="config-errors"></div>
+
+    <section class="card">
+      <h2>Who's in</h2>
+      <div class="roster" id="roster"></div>
+    </section>
+
+    <section class="card">
+      <h2>Rules</h2>
+      <ul class="clean rules" id="rules"></ul>
+    </section>
+
+    <section class="card">
+      <h2>Draw names</h2>
+      <p class="muted small">
+        The draw happens here, and <b>you won't see who has who</b>, so you can take part too.
+        You'll get one link per family. Each family's link shows only that family's picks.
+      </p>
+      <button class="btn big" id="draw-btn">🎲 Draw names</button>
+      <div id="draw-status" style="margin-top:14px"></div>
+    </section>
+
+    <section class="card links" id="links-card" hidden>
+      <h2>Send these links</h2>
+      <p class="muted small" style="margin-top:-6px">
+        Draw code <span class="code" id="draw-code"></span>. Each family page shows this code,
+        so you can check that every family has a link from the same draw.
+      </p>
+      <div id="links"></div>
+      <p class="muted small" style="margin-bottom:0">
+        ⚠️ If you draw again, you'll get <b>new</b> links. Links from an earlier draw still open,
+        but they show the old picks. Send links from one draw only.
+      </p>
+    </section>
+
+    <footer>Edit names and rules in <code>config.js</code>.</footer>
+  </div>
+
+  <script src="config.js"></script>
+  <script src="shared.js"></script>
+  <script>
+    (function () {
+      const cfg = window.EXCHANGE_CONFIG;
+      const GE = window.GiftExchange;
+      const STORE = "gift-exchange-last-draw";
+      const $ = (id) => document.getElementById(id);
+      const esc = (s) => String(s).replace(/[&<>"']/g, (c) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" }[c]));
+
+      document.title = cfg.title + " Organizer";
+      $("title").textContent = cfg.title + (cfg.year ? " " + cfg.year : "");
+
+      // Roster
+      const roleLabel = { parent: "parent", child: "kid", solo: "" };
+      $("roster").innerHTML = cfg.groups.map((g) => `
+        <div class="fam"><b>${esc(g.name)}</b>
+          <ul class="clean">${g.members.map((m) =>
+            `<li>${esc(m.name)}${roleLabel[m.role] ? `<span class="tag">${roleLabel[m.role]}</span>` : ""}</li>`).join("")}
+          </ul>
+        </div>`).join("");
+
+      // Rules
+      const r = cfg.rules || {};
+      const rules = [
+        "Everyone gives one gift and gets one gift, and nobody gets themselves",
+        "Kids never get their own mom or dad",
+        "Parents never get their spouse",
+      ];
+      if (r.noMutualPairs) rules.push("No two people get each other");
+      if (r.noParentDrawsOwnChild) rules.push("Parents never get their own kids");
+      if (r.noSiblings) rules.push("Brothers and sisters never get each other");
+      $("rules").innerHTML = rules.map((t) => `<li>${esc(t)}</li>`).join("");
+
+      // Config problems
+      const errors = GE.validateConfig(cfg);
+      if (errors.length) {
+        $("config-errors").innerHTML = `<div class="card err">${errors.map(esc).join("<br>")}</div>`;
+        $("draw-btn").disabled = true;
+      }
+
+      const viewBase = new URL("view.html", location.href).href;
+
+      function renderLinks(saved) {
+        $("draw-code").textContent = saved.code;
+        $("links").innerHTML = saved.links.map((l, i) => `
+          <div class="row">
+            <span class="name">${esc(l.groupName)}</span>
+            <span class="actions">
+              <button class="btn small" data-copy="${i}">Copy link</button>
+              ${navigator.share ? `<button class="btn small secondary" data-share="${i}">Share…</button>` : ""}
+            </span>
+            <input readonly value="${esc(l.url)}" aria-label="Link for ${esc(l.groupName)}" />
+          </div>`).join("");
+        $("links-card").hidden = false;
+
+        $("links").querySelectorAll("[data-copy]").forEach((b) => b.addEventListener("click", async () => {
+          const l = saved.links[+b.dataset.copy];
+          try { await navigator.clipboard.writeText(l.url); }
+          catch { const inp = b.closest(".row").querySelector("input"); inp.select(); document.execCommand("copy"); }
+          b.textContent = "Copied ✓";
+          setTimeout(() => (b.textContent = "Copy link"), 1500);
+        }));
+        $("links").querySelectorAll("[data-share]").forEach((b) => b.addEventListener("click", () => {
+          const l = saved.links[+b.dataset.share];
+          navigator.share({ title: cfg.title, text: `${l.groupName}: here's who your family is getting gifts for 🎁`, url: l.url }).catch(() => {});
+        }));
+      }
+
+      function doDraw() {
+        try {
+          const result = GE.draw(cfg);
+          const problems = GE.checkAssignments(result.people, result.pairs, cfg.rules || {});
+          if (problems.length) throw new Error(problems.join("; "));
+          const code = GE.makeDrawCode();
+          const links = GE.buildGroupPayloads(cfg, result, code).map((g) => ({
+            groupName: g.groupName,
+            url: viewBase + "#" + GE.encodePayload(g.payload),
+          }));
+          const saved = { code, at: new Date().toISOString(), links };
+          try { localStorage.setItem(STORE, JSON.stringify(saved)); } catch {}
+          $("draw-status").innerHTML = `<div class="ok">✓ Done! All ${result.people.length} people have someone, and every rule is followed.</div>`;
+          renderLinks(saved);
+        } catch (e) {
+          $("draw-status").innerHTML = `<div class="err">${esc(e.message)}</div>`;
+        }
+      }
+
+      $("draw-btn").addEventListener("click", () => {
+        if (!$("links-card").hidden &&
+            !confirm("Draw again? This makes NEW links. Only send links from the newest draw.")) return;
+        doDraw();
+      });
+
+      // Bring back the last draw on reload, so the links aren't lost.
+      try {
+        const saved = JSON.parse(localStorage.getItem(STORE) || "null");
+        if (saved && saved.links) {
+          $("draw-status").innerHTML = `<div class="ok">Showing your last draw from ${new Date(saved.at).toLocaleString()}.</div>`;
+          renderLinks(saved);
+        }
+      } catch {}
+    })();
+  </script>
+</body>
+</html>
